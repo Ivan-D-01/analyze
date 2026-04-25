@@ -32,7 +32,7 @@ GrLivArea: 45.48
 TotalBsmtSF: 13.65
 interaction columns: 24
 
-Эксперимент 2. Полные взаимодействия OverallQual x Neighborhood
+Эксперимент 2. Полные взаимодействия OverallQual (Материалы в доме) x Neighborhood (район)
 
 Аналитическое решение
 Матрица вырождена: ранг 74 < 77
