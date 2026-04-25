@@ -167,7 +167,7 @@ OverallQual: Rates the overall material and finish of the house
        3  Fair
        2  Poor
        1  Very Poor
-  
+
 OverallCond: Rates the overall condition of the house
 
        10 Very Excellent
