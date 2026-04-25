@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import typing as t
+from pathlib import Path
 
 
 class HousePricesResolver:
@@ -23,7 +24,9 @@ class HousePricesResolver:
         :param column_name: имя категориальной колонки
         :return: DataFrame с one-hot encoded колонками и исходный DataFrame без исходной колонки
         """
-        dummies = pd.get_dummies(df[column_name], prefix=column_name, dtype="int8")
+        dummies = pd.get_dummies(
+            df[column_name], prefix=column_name, dtype="int8", drop_first=True
+        )
         df = pd.concat([df.drop(column_name, axis=1), dummies], axis=1)
         return df
 
@@ -111,28 +114,28 @@ class HousePricesResolver:
 
     def add_interactions(self, df):
         """
-        Добавление взаимодействий между категориальными переменными
+        Добавление взаимодействий между OverallQual и one-hot колонками Neighborhood
         :param df: DataFrame с признаками
-        :param categorical_cols: список базовых категориальных переменных
         :return: DataFrame с добавленными взаимодействиями
         """
         df_with_interactions = df.copy()
 
-        all_columns = df.columns.tolist()
-        # print(all_columns)
-        encoded_cols = []
-        for col in self.continious_cols:
-            encoded_cols.extend([c for c in all_columns if c.startswith(col + "_")])
-        # print(encoded_cols)
-        n = len(encoded_cols)
-        for i in range(n):
-            for j in range(i + 1, n):
-                col1 = encoded_cols[i]
-                col2 = encoded_cols[j]
-                new_col_name = f"{col1}_x_{col2}"
-                df_with_interactions[new_col_name] = (
-                    df_with_interactions[col1] * df_with_interactions[col2]
-                )
+        interaction_cols = [
+            col
+            for col in df.columns
+            if col.startswith("Neighborhood_")
+        ]
+        print(f"interaction columns: {len(interaction_cols)}")
+
+        base_feature = "OverallQual"
+        if base_feature not in df.columns:
+            return df_with_interactions
+
+        for interaction_col in interaction_cols:
+            new_col_name = f"{base_feature}_x_{interaction_col}"
+            df_with_interactions[new_col_name] = (
+                df_with_interactions[base_feature] * df_with_interactions[interaction_col]
+            )
 
         return df_with_interactions
 
@@ -166,7 +169,7 @@ class HousePricesResolver:
 
     def resolve(self):
 
-        X, y = self.prepare_data(df)
+        X, y = self.prepare_data(self.df)
         # print(X.dtypes)
         X_train, X_test, y_train, y_test = self.train_test_split(
             X, y, test_size=0.2, random_state=42
@@ -187,24 +190,25 @@ class HousePricesResolver:
         for feature, coef in zip(X.columns[:10], coefficients[:10]):
             print(f"{feature}: {coef:.2f}")
 
-        # X_with_interactions = self.add_interactions(X)
+        X_with_interactions = self.add_interactions(X)
 
-        # X_train_int, X_test_int, y_train_int, y_test_int = self.train_test_split(
-        #     X_with_interactions, y, test_size=0.2, random_state=42)
+        X_train_int, X_test_int, y_train_int, y_test_int = self.train_test_split(
+            X_with_interactions, y, test_size=0.2, random_state=42)
 
-        # coefficients_int = self.linear_regression_analytical(X_train_int, y_train_int)
+        coefficients_int = self.linear_regression_analytical(X_train_int, y_train_int)
 
-        # y_train_pred_int = self.predict(X_train_int, coefficients_int)
-        # train_r2_int = self.r2_score(y_train_int, y_train_pred_int)
-        # print(f"\nR2 с взаимодействиями на обучающей выборке: {train_r2_int:.4f}")
+        y_train_pred_int = self.predict(X_train_int, coefficients_int)
+        train_r2_int = self.r2_score(y_train_int, y_train_pred_int)
+        print(f"\nR2 с взаимодействиями на обучающей выборке: {train_r2_int:.4f}")
 
-        # y_test_pred_int = self.predict(X_test_int, coefficients_int)
-        # test_r2_int = self.r2_score(y_test_int, y_test_pred_int)
-        # print(f"R2 с взаимодействиями на тестовой выборке: {test_r2_int:.4f}")
+        y_test_pred_int = self.predict(X_test_int, coefficients_int)
+        test_r2_int = self.r2_score(y_test_int, y_test_pred_int)
+        print(f"R2 с взаимодействиями на тестовой выборке: {test_r2_int:.4f}")
 
 
 if __name__ == "__main__":
-    df = pd.read_csv("statistics_ml/task1/data/house_prices.csv")
+    data_path = Path(__file__).resolve().parent / "data" / "house_prices.csv"
+    df = pd.read_csv(data_path)
 
     house_prices_resolver = HousePricesResolver(
         df=df,
@@ -212,6 +216,8 @@ if __name__ == "__main__":
         continious_cols=[
             "LotFrontage",
             "LotArea",
+            "OverallQual",
+            "OverallCond",
             "YearBuilt",
             "YearRemodAdd",
             "1stFlrSF",
@@ -222,12 +228,8 @@ if __name__ == "__main__":
         ],
         categorical_cols=[
             "MSZoning",
-            "Street",
-            "Alley",
             "LotShape",
             "LandContour",
-            "OverallQual",
-            "OverallCond",
             "Utilities",
             "LotConfig",
             "LandSlope",
