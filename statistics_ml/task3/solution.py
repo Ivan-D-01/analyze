@@ -103,7 +103,7 @@ def generate_and_compare_with_lasso_2(X, y, N, M, true_coefs):
     }
 
     params = {
-        "Lasso": {"alpha": np.linspace(-10, 10, 100)}
+        "Lasso": {"alpha": np.logspace(-10, 10, 100)}
     }
 
     results = {}
@@ -174,7 +174,7 @@ def stepwise_regression(X, y, N):
 
 if __name__ == "__main__":
 
-    data = pd.read_csv("statistics_ml/task2/data_houses/house_prices.csv")
+    data = pd.read_csv("analyze/statistics_ml/task2/data_houses/house_prices.csv")
 
     target_col = ["SalePrice"]
     continious_cols = [
@@ -191,7 +191,7 @@ if __name__ == "__main__":
         "MasVnrType", "ExterQual", "ExterCond", "Foundation"
     ]
 
-    #compare_simple_ridge_and_lasso_1(data, categorical_cols, continious_cols, target_col)
+    compare_simple_ridge_and_lasso_1(data, categorical_cols, continious_cols, target_col)
     
     X, y, N, M, true_coefs = generate_data()
     
