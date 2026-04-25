@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 import typing as t
 from pathlib import Path
+from sklearn.linear_model import LinearRegression
+
+INTERACTION_NEIGHBORHOODS = ["NAmes", "CollgCr", "OldTown", "Edwards", "Somerst"]
 
 
 class HousePricesResolver:
@@ -97,6 +100,17 @@ class HousePricesResolver:
         """
         return np.dot(X, coefficients)
 
+    def linear_regression_sklearn(self, X, y):
+        """
+        Решение линейной регрессии методом наименьших квадратов через scikit-learn
+        :param X: матрица признаков (n_samples, n_features)
+        :param y: вектор целевой переменной (n_samples,)
+        :return: обученная модель и вектор коэффициентов
+        """
+        model = LinearRegression(fit_intercept=False)
+        model.fit(X, y)
+        return model, model.coef_
+
     def r2_score(self, y_true, y_pred):
         """
         Расчет R^2 (коэффициента детерминации)
@@ -112,10 +126,12 @@ class HousePricesResolver:
 
         return 1 - (ss_residual / ss_total)
 
-    def add_interactions(self, df):
+    def add_interactions(self, df, neighborhoods: t.Optional[t.List[str]] = None):
         """
         Добавление взаимодействий между OverallQual и one-hot колонками Neighborhood
         :param df: DataFrame с признаками
+        :param neighborhoods: список районов для частичных взаимодействий;
+                              если None, используются все районы
         :return: DataFrame с добавленными взаимодействиями
         """
         df_with_interactions = df.copy()
@@ -124,6 +140,10 @@ class HousePricesResolver:
             col
             for col in df.columns
             if col.startswith("Neighborhood_")
+            and (
+                neighborhoods is None
+                or col.split("Neighborhood_", 1)[1] in neighborhoods
+            )
         ]
         print(f"interaction columns: {len(interaction_cols)}")
 
@@ -138,6 +158,45 @@ class HousePricesResolver:
             )
 
         return df_with_interactions
+
+    def print_coefficients(self, X, coefficients, limit=10):
+        print(f"Коэффициенты (первые {limit}):")
+        for feature, coef in zip(X.columns[:limit], coefficients[:limit]):
+            print(f"{feature}: {coef:.2f}")
+
+    def run_experiment(self, title, X, y):
+        print(f"\n{title}")
+        X_train, X_test, y_train, y_test = self.train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
+
+        print("\nАналитическое решение")
+        coefficients = self.linear_regression_analytical(X_train, y_train)
+
+        y_train_pred = self.predict(X_train, coefficients)
+        train_r2 = self.r2_score(y_train, y_train_pred)
+        print(f"R2 на обучающей выборке: {train_r2:.4f}")
+
+        y_test_pred = self.predict(X_test, coefficients)
+        test_r2 = self.r2_score(y_test, y_test_pred)
+        print(f"R2 на тестовой выборке: {test_r2:.4f}")
+
+        self.print_coefficients(X_train, coefficients, limit=10)
+
+        print("\nМНК через scikit-learn")
+        sklearn_model, sklearn_coefficients = self.linear_regression_sklearn(
+            X_train, y_train
+        )
+
+        sklearn_y_train_pred = sklearn_model.predict(X_train)
+        sklearn_train_r2 = self.r2_score(y_train, sklearn_y_train_pred)
+        print(f"R2 на обучающей выборке: {sklearn_train_r2:.4f}")
+
+        sklearn_y_test_pred = sklearn_model.predict(X_test)
+        sklearn_test_r2 = self.r2_score(y_test, sklearn_y_test_pred)
+        print(f"R2 на тестовой выборке: {sklearn_test_r2:.4f}")
+
+        self.print_coefficients(X_train, sklearn_coefficients, limit=10)
 
     def train_test_split(self, X, y, test_size=0.2, random_state=None):
         """
@@ -170,40 +229,23 @@ class HousePricesResolver:
     def resolve(self):
 
         X, y = self.prepare_data(self.df)
-        # print(X.dtypes)
-        X_train, X_test, y_train, y_test = self.train_test_split(
-            X, y, test_size=0.2, random_state=42
+        self.run_experiment("Эксперимент 1. Базовая модель", X, y)
+
+        X_full_interactions = self.add_interactions(X, neighborhoods=None)
+        self.run_experiment(
+            "Эксперимент 2. Полные взаимодействия OverallQual x Neighborhood",
+            X_full_interactions,
+            y,
         )
 
-        coefficients = self.linear_regression_analytical(X_train, y_train)
-
-        y_train_pred = self.predict(X_train, coefficients)
-
-        train_r2 = self.r2_score(y_train, y_train_pred)
-        print(f"R2 на обучающей выборке: {train_r2}")
-
-        y_test_pred = self.predict(X_test, coefficients)
-        test_r2 = self.r2_score(y_test, y_test_pred)
-        print(f"R2 на тестовой выборке: {test_r2:.4f}")
-
-        print("\nИнтерпретация коэффициентов (первые 10):")
-        for feature, coef in zip(X.columns[:10], coefficients[:10]):
-            print(f"{feature}: {coef:.2f}")
-
-        X_with_interactions = self.add_interactions(X)
-
-        X_train_int, X_test_int, y_train_int, y_test_int = self.train_test_split(
-            X_with_interactions, y, test_size=0.2, random_state=42)
-
-        coefficients_int = self.linear_regression_analytical(X_train_int, y_train_int)
-
-        y_train_pred_int = self.predict(X_train_int, coefficients_int)
-        train_r2_int = self.r2_score(y_train_int, y_train_pred_int)
-        print(f"\nR2 с взаимодействиями на обучающей выборке: {train_r2_int:.4f}")
-
-        y_test_pred_int = self.predict(X_test_int, coefficients_int)
-        test_r2_int = self.r2_score(y_test_int, y_test_pred_int)
-        print(f"R2 с взаимодействиями на тестовой выборке: {test_r2_int:.4f}")
+        X_partial_interactions = self.add_interactions(
+            X, neighborhoods=INTERACTION_NEIGHBORHOODS
+        )
+        self.run_experiment(
+            "Эксперимент 3. Частичные взаимодействия OverallQual x Neighborhood",
+            X_partial_interactions,
+            y,
+        )
 
 
 if __name__ == "__main__":
