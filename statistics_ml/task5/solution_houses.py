@@ -32,6 +32,30 @@ class HousesTask5Resolver:
         self.validation_size = 0.2
         self.kernel_bandwidth_grid = [0.3, 0.6, 0.9, 1.2, 1.8]
         self.gp_tuning_sample_size = 250
+        self.kernel_candidates = (
+            ("gaussian", "lc"),
+            ("gaussian", "ll"),
+            ("tricube", "lc"),
+            ("tricube", "ll"),
+        )
+        self.gp_kernel_candidates = {
+            "linear": [
+                DotProduct(sigma_0=sigma_0) + WhiteKernel(noise_level=noise_level)
+                for sigma_0 in [0.5, 1.0]
+                for noise_level in [0.01, 0.05]
+            ],
+            "gaussian": [
+                RBF(length_scale=length_scale) + WhiteKernel(noise_level=noise_level)
+                for length_scale in [0.4, 0.8, 1.2]
+                for noise_level in [0.01, 0.05]
+            ],
+            "exponential": [
+                Matern(length_scale=length_scale, nu=0.5)
+                + WhiteKernel(noise_level=noise_level)
+                for length_scale in [0.4, 0.8, 1.2]
+                for noise_level in [0.01, 0.05]
+            ],
+        }
 
     @staticmethod
     def format_number(value, digits=4):
@@ -57,6 +81,43 @@ class HousesTask5Resolver:
             random_state=self.random_state,
         )
 
+    @staticmethod
+    def choose_best(candidates):
+        return min(candidates, key=lambda candidate: candidate["cv_mse"])
+
+    @staticmethod
+    def evaluate_predictions(y_true, predictions):
+        return {
+            "mse": float(mean_squared_error(y_true, predictions)),
+            "r2": float(r2_score(y_true, predictions)),
+        }
+
+    @staticmethod
+    def build_gp_pipeline(kernel, random_state):
+        return Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scale", StandardScaler()),
+                (
+                    "gp",
+                    GaussianProcessRegressor(
+                        kernel=kernel,
+                        alpha=0.0,
+                        normalize_y=True,
+                        optimizer=None,
+                        random_state=random_state,
+                    ),
+                ),
+            ]
+        )
+
+    def sample_for_tuning(self, X, y, sample_size):
+        if len(X) <= sample_size:
+            return X, y
+
+        sampled_index = X.sample(n=sample_size, random_state=self.random_state).index
+        return X.loc[sampled_index], y.loc[sampled_index]
+
     def fit_kernel_smoother(self, X_train, X_test, y_train, y_test):
         X_subtrain, X_val, y_subtrain, y_val = self.prepare_validation_split(X_train, y_train)
         imputer = SimpleImputer(strategy="median")
@@ -70,148 +131,81 @@ class HousesTask5Resolver:
         y_train_arr = y_train.to_numpy()
         y_test_arr = y_test.to_numpy()
 
-        kernels = ["gaussian", "tricube"]
-        reg_types = ["lc", "ll"]
         var_type = "c" * X_train_arr.shape[1]
 
-        best = None
         self.kernel_results = []
-        for kernel_name in kernels:
-            for reg_type in reg_types:
-                for bandwidth in self.kernel_bandwidth_grid:
-                    bandwidth_vector = np.full(X_train_arr.shape[1], bandwidth, dtype=float)
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore", RuntimeWarning)
-                        model = KernelReg(
-                            endog=y_subtrain_arr,
-                            exog=X_subtrain_arr,
-                            var_type=var_type,
-                            reg_type=reg_type,
-                            bw=bandwidth_vector,
-                            ckertype=kernel_name,
-                        )
-                        val_pred, _ = model.fit(X_val_arr)
-                        train_pred, _ = model.fit(X_train_arr)
-                        test_pred, _ = model.fit(X_test_arr)
+        for kernel_name, reg_type in self.kernel_candidates:
+            for bandwidth in self.kernel_bandwidth_grid:
+                bandwidth_vector = np.full(X_train_arr.shape[1], bandwidth, dtype=float)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    model = KernelReg(
+                        endog=y_subtrain_arr,
+                        exog=X_subtrain_arr,
+                        var_type=var_type,
+                        reg_type=reg_type,
+                        bw=bandwidth_vector,
+                        ckertype=kernel_name,
+                    )
+                    val_pred, _ = model.fit(X_val_arr)
+                    train_pred, _ = model.fit(X_train_arr)
+                    test_pred, _ = model.fit(X_test_arr)
 
-                    candidate = {
+                train_metrics = self.evaluate_predictions(y_train_arr, train_pred)
+                test_metrics = self.evaluate_predictions(y_test_arr, test_pred)
+                self.kernel_results.append(
+                    {
                         "kernel": kernel_name,
                         "reg_type": reg_type,
                         "bandwidth": bandwidth_vector.copy(),
                         "cv_mse": float(mean_squared_error(y_val_arr, val_pred)),
-                        "train_mse": float(mean_squared_error(y_train_arr, train_pred)),
-                        "test_mse": float(mean_squared_error(y_test_arr, test_pred)),
-                        "train_r2": float(r2_score(y_train_arr, train_pred)),
-                        "test_r2": float(r2_score(y_test_arr, test_pred)),
+                        "train_mse": train_metrics["mse"],
+                        "test_mse": test_metrics["mse"],
+                        "train_r2": train_metrics["r2"],
+                        "test_r2": test_metrics["r2"],
                         "test_pred": test_pred,
                     }
-                    self.kernel_results.append(candidate)
-                    if best is None or candidate["cv_mse"] < best["cv_mse"]:
-                        best = candidate
+                )
 
-        self.kernel_result = best
+        self.kernel_result = self.choose_best(self.kernel_results)
 
     def fit_gaussian_process(self, X_train, X_test, y_train, y_test):
         X_subtrain, X_val, y_subtrain, y_val = self.prepare_validation_split(X_train, y_train)
-        if len(X_subtrain) > self.gp_tuning_sample_size:
-            tune_indices = X_subtrain.sample(
-                n=self.gp_tuning_sample_size,
-                random_state=self.random_state,
-            ).index
-            X_subtrain_tune = X_subtrain.loc[tune_indices]
-            y_subtrain_tune = y_subtrain.loc[tune_indices]
-        else:
-            X_subtrain_tune = X_subtrain
-            y_subtrain_tune = y_subtrain
-
-        kernel_candidates = [
-            (
-                "linear",
-                [
-                    DotProduct(sigma_0=sigma_0) + WhiteKernel(noise_level=noise_level)
-                    for sigma_0 in [0.5, 1.0]
-                    for noise_level in [0.01, 0.05]
-                ],
-            ),
-            (
-                "gaussian",
-                [
-                    RBF(length_scale=length_scale) + WhiteKernel(noise_level=noise_level)
-                    for length_scale in [0.4, 0.8, 1.2]
-                    for noise_level in [0.01, 0.05]
-                ],
-            ),
-            (
-                "exponential",
-                [
-                    Matern(length_scale=length_scale, nu=0.5)
-                    + WhiteKernel(noise_level=noise_level)
-                    for length_scale in [0.4, 0.8, 1.2]
-                    for noise_level in [0.01, 0.05]
-                ],
-            ),
-        ]
-
-        best = None
+        X_subtrain_tune, y_subtrain_tune = self.sample_for_tuning(
+            X_subtrain,
+            y_subtrain,
+            self.gp_tuning_sample_size,
+        )
         self.gp_results = []
-        for kernel_name, kernels in kernel_candidates:
+        for kernel_name, kernels in self.gp_kernel_candidates.items():
             for kernel in kernels:
-                pipeline = Pipeline(
-                    [
-                        ("imputer", SimpleImputer(strategy="median")),
-                        ("scale", StandardScaler()),
-                        (
-                            "gp",
-                            GaussianProcessRegressor(
-                                kernel=kernel,
-                                alpha=0.0,
-                                normalize_y=True,
-                                optimizer=None,
-                                random_state=self.random_state,
-                            ),
-                        ),
-                    ]
-                )
+                pipeline = self.build_gp_pipeline(kernel, self.random_state)
                 pipeline.fit(X_subtrain_tune, y_subtrain_tune)
                 val_pred = pipeline.predict(X_val)
 
-                final_pipeline = Pipeline(
-                    [
-                        ("imputer", SimpleImputer(strategy="median")),
-                        ("scale", StandardScaler()),
-                        (
-                            "gp",
-                            GaussianProcessRegressor(
-                                kernel=kernel,
-                                alpha=0.0,
-                                normalize_y=True,
-                                optimizer=None,
-                                random_state=self.random_state,
-                            ),
-                        ),
-                    ]
-                )
+                final_pipeline = self.build_gp_pipeline(kernel, self.random_state)
                 final_pipeline.fit(X_train, y_train)
                 train_pred, train_std = final_pipeline.predict(X_train, return_std=True)
                 test_pred, test_std = final_pipeline.predict(X_test, return_std=True)
 
-                candidate = {
-                    "kernel_name": kernel_name,
-                    "kernel_repr": str(kernel),
-                    "cv_mse": float(mean_squared_error(y_val, val_pred)),
-                    "train_mse": float(mean_squared_error(y_train, train_pred)),
-                    "test_mse": float(mean_squared_error(y_test, test_pred)),
-                    "train_r2": float(r2_score(y_train, train_pred)),
-                    "test_r2": float(r2_score(y_test, test_pred)),
-                    "train_std_mean": float(np.mean(train_std)),
-                    "test_std_mean": float(np.mean(test_std)),
-                    "test_pred": test_pred,
-                }
-                self.gp_results.append(candidate)
-                if best is None or candidate["cv_mse"] < best["cv_mse"]:
-                    best = candidate
+                train_metrics = self.evaluate_predictions(y_train, train_pred)
+                test_metrics = self.evaluate_predictions(y_test, test_pred)
+                self.gp_results.append(
+                    {
+                        "kernel_name": kernel_name,
+                        "kernel_repr": str(kernel),
+                        "cv_mse": float(mean_squared_error(y_val, val_pred)),
+                        "train_mse": train_metrics["mse"],
+                        "test_mse": test_metrics["mse"],
+                        "train_r2": train_metrics["r2"],
+                        "test_r2": test_metrics["r2"],
+                        "train_std_mean": float(np.mean(train_std)),
+                        "test_std_mean": float(np.mean(test_std)),
+                        "test_pred": test_pred,
+                    }
+                )
 
-        self.gp_result = best
+        self.gp_result = self.choose_best(self.gp_results)
 
     def make_plot(self, y_test):
         order = np.argsort(y_test.to_numpy())
