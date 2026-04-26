@@ -5,8 +5,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from sklearn.base import clone
 from sklearn.linear_model import Ridge
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import PolynomialFeatures, SplineTransformer, StandardScaler
 
@@ -24,6 +25,7 @@ class ExpantionsResolver:
         self.spline_result = None
         self.smoothed_spline_result = None
         self.smoothed_x_knot_spline_result = None
+        self.comparison_result = None
         self.fixed_knots = np.array([-2.0, -0.5, 1.0, 2.5, 4.0]).reshape(-1, 1)
         self.percent_of_x_knots = 0.5
         np.random.seed(self.random_state)
@@ -32,20 +34,41 @@ class ExpantionsResolver:
     def f(x):
         return np.exp(-(x**2)) - np.exp(-((x - 2) ** 2) / 8)
 
+    @staticmethod
+    def format_number(value, digits=4):
+        if isinstance(value, (int, np.integer)):
+            return str(value)
+        return f"{float(value):.{digits}f}"
+
+    def format_sequence(self, values, digits=4):
+        return "[" + ", ".join(self.format_number(value, digits) for value in values) + "]"
+
+    @staticmethod
+    def mse(y_true, y_pred):
+        return float(np.mean((y_true - y_pred) ** 2))
+
     def generate_sample(self):
         x = np.sort(np.random.uniform(self.domain[0], self.domain[1], self.n_samples))
         y_true = self.f(x)
         y = y_true + np.random.normal(0.0, self.sigma, self.n_samples)
         return x.reshape(-1, 1), y
 
+    def compute_cv_mse(self, model, x, y):
+        scores = cross_val_score(
+            clone(model),
+            x,
+            y,
+            scoring="neg_mean_squared_error",
+            cv=5,
+            n_jobs=1,
+        )
+        return float(-scores.mean())
+
     def fit_polynomial_ridge(self, x, y):
         pipeline = Pipeline(
             [
                 ("poly", PolynomialFeatures(include_bias=False)),
-                (
-                    "scale",
-                    StandardScaler(),
-                ),  # Добавлено из-за LinAlgWarning: ill-conditioned matrix.
+                ("scale", StandardScaler()),
                 ("ridge", Ridge()),
             ]
         )
@@ -65,7 +88,9 @@ class ExpantionsResolver:
         self.polynomial_result = {
             "degree": search.best_params_["poly__degree"],
             "alpha": search.best_params_["ridge__alpha"],
-            "cv_mse": -search.best_score_,
+            "cv_mse": float(-search.best_score_),
+            "train_mse": self.mse(y, search.best_estimator_.predict(x)),
+            "degrees_of_freedom": search.best_params_["poly__degree"] + 1,
         }
         return search.best_estimator_
 
@@ -87,7 +112,8 @@ class ExpantionsResolver:
         pred = model.predict(x)
         self.spline_result = {
             "knots": self.fixed_knots.ravel().tolist(),
-            "train_mse": float(np.mean((y - pred) ** 2)),
+            "cv_mse": self.compute_cv_mse(model, x, y),
+            "train_mse": self.mse(y, pred),
             "degrees_of_freedom": int(model.named_steps["spline"].n_features_out_ + 1),
         }
         return model
@@ -121,8 +147,8 @@ class ExpantionsResolver:
         self.smoothed_spline_result = {
             "knots": self.fixed_knots.ravel().tolist(),
             "alpha": search.best_params_["ridge__alpha"],
-            "cv_mse": -search.best_score_,
-            "train_mse": float(np.mean((y - pred) ** 2)),
+            "cv_mse": float(-search.best_score_),
+            "train_mse": self.mse(y, pred),
             "degrees_of_freedom": int(best_model.named_steps["spline"].n_features_out_ + 1),
         }
         return best_model
@@ -130,7 +156,11 @@ class ExpantionsResolver:
     def fit_smoothed_x_knot_cubic_spline(self, x: np.ndarray, y: np.ndarray):
         x_knots = np.unique(
             np.sort(
-                np.random.choice(x[:, 0], size=int(len(x) * self.percent_of_x_knots), replace=False)
+                np.random.choice(
+                    x[:, 0],
+                    size=int(len(x) * self.percent_of_x_knots),
+                    replace=False,
+                )
             )
         ).reshape(-1, 1)
 
@@ -162,11 +192,46 @@ class ExpantionsResolver:
         self.smoothed_x_knot_spline_result = {
             "knots": x_knots.ravel().tolist(),
             "alpha": search.best_params_["ridge__alpha"],
-            "cv_mse": -search.best_score_,
-            "train_mse": float(np.mean((y - pred) ** 2)),
+            "cv_mse": float(-search.best_score_),
+            "train_mse": self.mse(y, pred),
             "degrees_of_freedom": int(best_model.named_steps["spline"].n_features_out_ + 1),
         }
         return best_model
+
+    def build_comparison(self):
+        rows = [
+            {
+                "name": "Полиномиальный Ridge",
+                "cv_mse": self.polynomial_result["cv_mse"],
+                "train_mse": self.polynomial_result["train_mse"],
+                "degrees_of_freedom": self.polynomial_result["degrees_of_freedom"],
+            },
+            {
+                "name": "Фиксированный кубический сплайн без сглаживания",
+                "cv_mse": self.spline_result["cv_mse"],
+                "train_mse": self.spline_result["train_mse"],
+                "degrees_of_freedom": self.spline_result["degrees_of_freedom"],
+            },
+            {
+                "name": "Фиксированный кубический сплайн со сглаживанием",
+                "cv_mse": self.smoothed_spline_result["cv_mse"],
+                "train_mse": self.smoothed_spline_result["train_mse"],
+                "degrees_of_freedom": self.smoothed_spline_result["degrees_of_freedom"],
+            },
+            {
+                "name": "Сглаживающий сплайн по наблюдаемым x",
+                "cv_mse": self.smoothed_x_knot_spline_result["cv_mse"],
+                "train_mse": self.smoothed_x_knot_spline_result["train_mse"],
+                "degrees_of_freedom": self.smoothed_x_knot_spline_result["degrees_of_freedom"],
+            },
+        ]
+        best_by_cv = min(rows, key=lambda row: row["cv_mse"])
+        min_df = min(rows, key=lambda row: row["degrees_of_freedom"])
+        self.comparison_result = {
+            "rows": rows,
+            "best_by_cv": best_by_cv,
+            "min_df": min_df,
+        }
 
     def make_plot(
         self,
@@ -187,7 +252,7 @@ class ExpantionsResolver:
             marker="x",
             s=80,
             linewidths=2,
-            label="узлы сплайна",
+            label="узлы фиксированного сплайна",
         )
         plt.plot(grid_x[:, 0], self.f(grid_x[:, 0]), linewidth=2, label="истинная f(x)")
         plt.plot(
@@ -195,30 +260,30 @@ class ExpantionsResolver:
             polynomial_model.predict(grid_x),
             linewidth=2,
             color="green",
-            label="полиномиальный ридж",
+            label="полиномиальный Ridge",
         )
         plt.plot(
             grid_x[:, 0],
             spline_model.predict(grid_x),
             linewidth=2,
             color="orange",
-            label="кубический сплайн с фиксированными узлами",
+            label="фиксированный кубический сплайн",
         )
         plt.plot(
             grid_x[:, 0],
             smoothed_spline_model.predict(grid_x),
             linewidth=2,
             color="red",
-            label="сглаживающий кубический сплайн с фиксированными узлами",
+            label="сглаженный фиксированный кубический сплайн",
         )
         plt.plot(
             grid_x[:, 0],
             smoothed_x_knots_spline_model.predict(grid_x),
             linewidth=2,
             color="purple",
-            label="сглаживающий кубический сплайн по наблюдаемым x",
+            label="сглаженный сплайн по наблюдаемым x",
         )
-        plt.title("Полиномиальный ридж и кубические сплайны")
+        plt.title("Сравнение аппроксимаций")
         plt.xlabel("x")
         plt.ylabel("y")
         plt.legend()
@@ -256,6 +321,7 @@ class ExpantionsResolver:
         spline_model = self.fit_fixed_knot_cubic_spline(x, y)
         smoothed_spline_model = self.fit_smoothed_fixed_knot_cubic_spline(x, y)
         smoothed_x_knots_spline_model = self.fit_smoothed_x_knot_cubic_spline(x, y)
+        self.build_comparison()
         self.make_plot(
             x,
             y,
@@ -268,25 +334,42 @@ class ExpantionsResolver:
 
         print("\n#########################\n")
         print("Задание 4. Пункт 1")
-        print(f"Область определения: {self.domain}")
-        print(f"Сигма: {self.sigma}")
+        print(
+            "Область определения: "
+            f"({self.format_number(self.domain[0])}, {self.format_number(self.domain[1])})"
+        )
+        print(f"Сигма: {self.format_number(self.sigma)}")
         print(f"Размер выборки: {self.n_samples}")
         print(f"График сохранён в: {self.plot_path}")
         print(f"График базисных функций сохранён в: {self.basis_plot_path}")
-        print("Лучшая полиномиальная ридж-регрессия")
+        print("Лучшая полиномиальная Ridge-регрессия")
         print(f"Степень: {self.polynomial_result['degree']}")
-        print(f"Параметр alpha: {self.polynomial_result['alpha']}")
-        print(f"Средняя квадратичная ошибка CV: {self.polynomial_result['cv_mse']}")
+        print(f"Параметр alpha: {self.format_number(self.polynomial_result['alpha'])}")
+        print(
+            "Средняя квадратичная ошибка CV: "
+            f"{self.format_number(self.polynomial_result['cv_mse'])}"
+        )
+        print(
+            "Средняя квадратичная ошибка на обучении: "
+            f"{self.format_number(self.polynomial_result['train_mse'])}"
+        )
         print(
             "Число степеней свободы (приблизительно): "
-            f"{self.polynomial_result['degree'] + 1}"
+            f"{self.polynomial_result['degrees_of_freedom']}"
         )
 
         print("\n#########################\n")
         print("Задание 4. Пункт 2")
         print("Кубический сплайн с фиксированными узлами без сглаживания")
-        print(f"Узлы: {self.spline_result['knots']}")
-        print(f"Средняя квадратичная ошибка на обучении: {self.spline_result['train_mse']}")
+        print(f"Узлы: {self.format_sequence(self.spline_result['knots'])}")
+        print(
+            "Средняя квадратичная ошибка CV: "
+            f"{self.format_number(self.spline_result['cv_mse'])}"
+        )
+        print(
+            "Средняя квадратичная ошибка на обучении: "
+            f"{self.format_number(self.spline_result['train_mse'])}"
+        )
         print(
             "Число степеней свободы (приблизительно): "
             f"{self.spline_result['degrees_of_freedom']}"
@@ -295,12 +378,15 @@ class ExpantionsResolver:
         print("\n#########################\n")
         print("Задание 4. Пункт 3")
         print("Кубический сплайн с фиксированными узлами и сглаживанием")
-        print(f"Узлы: {self.smoothed_spline_result['knots']}")
-        print(f"Параметр alpha: {self.smoothed_spline_result['alpha']}")
-        print(f"Средняя квадратичная ошибка CV: {self.smoothed_spline_result['cv_mse']}")
+        print(f"Узлы: {self.format_sequence(self.smoothed_spline_result['knots'])}")
+        print(f"Параметр alpha: {self.format_number(self.smoothed_spline_result['alpha'])}")
+        print(
+            "Средняя квадратичная ошибка CV: "
+            f"{self.format_number(self.smoothed_spline_result['cv_mse'])}"
+        )
         print(
             "Средняя квадратичная ошибка на обучении: "
-            f"{self.smoothed_spline_result['train_mse']}"
+            f"{self.format_number(self.smoothed_spline_result['train_mse'])}"
         )
         print(
             "Число степеней свободы (приблизительно): "
@@ -310,22 +396,48 @@ class ExpantionsResolver:
         print("\n#########################\n")
         print("Задание 4. Пункт 4")
         print("Построены базисные функции для кубического сплайна с фиксированными узлами")
-        print(f"Узлы: {self.fixed_knots.ravel().tolist()}")
+        print(f"Узлы: {self.format_sequence(self.fixed_knots.ravel().tolist())}")
         print(f"График базисных функций сохранён в: {self.basis_plot_path}")
 
         print("\n#########################\n")
         print("Задание 4. Пункт 5")
         print("Сглаживающий кубический сплайн с узлами, равными наблюдаемым x")
-        print(f"Узлы: {self.smoothed_x_knot_spline_result['knots']}")
-        print(f"Параметр alpha: {self.smoothed_x_knot_spline_result['alpha']}")
-        print(f"Средняя квадратичная ошибка CV: {self.smoothed_x_knot_spline_result['cv_mse']}")
+        print(f"Узлы: {self.format_sequence(self.smoothed_x_knot_spline_result['knots'])}")
+        print(
+            "Параметр alpha: "
+            f"{self.format_number(self.smoothed_x_knot_spline_result['alpha'])}"
+        )
+        print(
+            "Средняя квадратичная ошибка CV: "
+            f"{self.format_number(self.smoothed_x_knot_spline_result['cv_mse'])}"
+        )
         print(
             "Средняя квадратичная ошибка на обучении: "
-            f"{self.smoothed_x_knot_spline_result['train_mse']}"
+            f"{self.format_number(self.smoothed_x_knot_spline_result['train_mse'])}"
         )
         print(
             "Число степеней свободы (приблизительно): "
             f"{self.smoothed_x_knot_spline_result['degrees_of_freedom']}"
+        )
+
+        print("\n#########################\n")
+        print("Задание 4. Пункт 6")
+        print("Сравнение моделей по числу степеней свободы и точности")
+        for row in self.comparison_result["rows"]:
+            print(
+                f"{row['name']}: CV MSE = {self.format_number(row['cv_mse'])}, "
+                f"train MSE = {self.format_number(row['train_mse'])}, "
+                f"степени свободы = {row['degrees_of_freedom']}"
+            )
+        print(
+            "Лучшая модель по CV: "
+            f"{self.comparison_result['best_by_cv']['name']} "
+            f"(CV MSE = {self.format_number(self.comparison_result['best_by_cv']['cv_mse'])})"
+        )
+        print(
+            "Модель с минимальным числом степеней свободы: "
+            f"{self.comparison_result['min_df']['name']} "
+            f"(степени свободы = {self.comparison_result['min_df']['degrees_of_freedom']})"
         )
 
 
