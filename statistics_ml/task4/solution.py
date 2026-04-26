@@ -14,6 +14,7 @@ class ExpantionsResolver:
     def __init__(self):
         self.base_dir = Path(__file__).resolve().parent
         self.plot_path = self.base_dir / "polynomial_ridge_plot.png"
+        self.basis_plot_path = self.base_dir / "cubic_spline_basis_plot.png"
         self.domain = (-2.0, 4.0)
         self.sigma = 0.2
         self.n_samples = 50
@@ -38,7 +39,8 @@ class ExpantionsResolver:
         pipeline = Pipeline(
             [
                 ("poly", PolynomialFeatures(include_bias=False)),
-                ("scale", StandardScaler()),
+                ("scale", StandardScaler()), # Добавлено из-за LinAlgWarning: Ill-conditioned matrix (rcond=8.57037e-17): result may not be accurate.
+                                             # return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
                 ("ridge", Ridge()),
             ]
         )
@@ -70,8 +72,7 @@ class ExpantionsResolver:
                     SplineTransformer(
                         degree=3,
                         knots=self.fixed_knots,
-                        include_bias=False,
-                        extrapolation="continue",
+                        include_bias=False
                     ),
                 ),
                 ("ridge", Ridge(alpha=0.0))
@@ -95,7 +96,7 @@ class ExpantionsResolver:
                         degree=3,
                         knots=self.fixed_knots,
                         include_bias=False,
-                        extrapolation="continue",
+                        #extrapolation="continue",
                     ),
                 ),
                 ("ridge", Ridge()),
@@ -125,7 +126,7 @@ class ExpantionsResolver:
     def make_plot(self, x, y, polynomial_model, spline_model, smoothed_spline_model):
         grid_x = np.linspace(self.domain[0], self.domain[1], 400).reshape(-1, 1)
         plt.figure(figsize=(10, 6))
-        plt.scatter(x[:, 0], y, color="black", s=25, label="sample")
+        plt.scatter(x[:, 0], y, color="black", s=25, label="выборка")
         plt.scatter(
             self.fixed_knots[:, 0],
             self.f(self.fixed_knots[:, 0]),
@@ -133,36 +134,61 @@ class ExpantionsResolver:
             marker="x",
             s=80,
             linewidths=2,
-            label="spline knots",
+            label="узлы сплайна",
         )
-        plt.plot(grid_x[:, 0], self.f(grid_x[:, 0]), linewidth=2, label="true f(x)")
+        plt.plot(grid_x[:, 0], self.f(grid_x[:, 0]), linewidth=2, label="истинная f(x)")
         plt.plot(
             grid_x[:, 0],
             polynomial_model.predict(grid_x),
             linewidth=2,
             color="green",
-            label="polynomial ridge",
+            label="полиномиальный ридж",
         )
         plt.plot(
             grid_x[:, 0],
             spline_model.predict(grid_x),
             linewidth=2,
             color="orange",
-            label="fixed-knot cubic spline",
+            label="кубический сплайн с фиксированными узлами",
         )
         plt.plot(
             grid_x[:, 0],
             smoothed_spline_model.predict(grid_x),
             linewidth=2,
             color="red",
-            label="smoothed fixed-knot cubic spline",
+            label="сглаживающий кубический сплайн с фиксированными узлами",
         )
-        plt.title("Polynomial Ridge And Fixed-Knot Cubic Spline")
+        plt.title("Полиномиальный ридж и кубические сплайны")
         plt.xlabel("x")
         plt.ylabel("y")
         plt.legend()
         plt.tight_layout()
         plt.savefig(self.plot_path, dpi=150)
+        plt.close()
+
+    def make_basis_plot(self, spline_model):
+        grid_x = np.linspace(self.domain[0], self.domain[1], 400).reshape(-1, 1)
+        basis = spline_model.named_steps["spline"].transform(grid_x)
+        # Стротся B-сплайны, они обеспечивают локальность 
+        # 
+        plt.figure(figsize=(10, 6))
+        for idx in range(basis.shape[1]):
+            plt.plot(grid_x[:, 0], basis[:, idx], linewidth=2, label=f"базис {idx + 1}")
+        for knot in self.fixed_knots[:, 0]:
+            plt.axvline(knot, color="gray", linestyle="--", linewidth=1)
+        plt.scatter(
+            self.fixed_knots[:, 0],
+            np.zeros_like(self.fixed_knots[:, 0]),
+            color="black",
+            s=30,
+            label="узлы",
+        )
+        plt.title("Базисные функции кубического сплайна с фиксированными узлами")
+        plt.xlabel("x")
+        plt.ylabel("значение базисной функции")
+        plt.legend(ncol=2)
+        plt.tight_layout()
+        plt.savefig(self.basis_plot_path, dpi=150)
         plt.close()
 
     def resolve(self):
@@ -171,37 +197,45 @@ class ExpantionsResolver:
         spline_model = self.fit_fixed_knot_cubic_spline(x, y)
         smoothed_spline_model = self.fit_smoothed_fixed_knot_cubic_spline(x, y)
         self.make_plot(x, y, polynomial_model, spline_model, smoothed_spline_model)
+        self.make_basis_plot(spline_model)
 
         print("\n#########################\n")
-        print("Task 4. Point 1")
-        print(f"Domain: {self.domain}")
-        print(f"Sigma: {self.sigma}")
-        print(f"N: {self.n_samples}")
-        print(f"Plot saved to: {self.plot_path}")
-        print("Best polynomial ridge model")
-        print(f"Degree: {self.polynomial_result['degree']}")
-        print(f"Alpha: {self.polynomial_result['alpha']}")
-        print(f"CV MSE: {self.polynomial_result['cv_mse']}")
-        print(f"Degrees of freedom (approx): {self.polynomial_result['degree'] + 1}")
+        print("Задание 4. Пункт 1")
+        print(f"Область определения: {self.domain}")
+        print(f"Сигма: {self.sigma}")
+        print(f"Размер выборки: {self.n_samples}")
+        print(f"График сохранён в: {self.plot_path}")
+        print(f"График базисных функций сохранён в: {self.basis_plot_path}")
+        print("Лучшая полиномиальная ридж-регрессия")
+        print(f"Степень: {self.polynomial_result['degree']}")
+        print(f"Параметр alpha: {self.polynomial_result['alpha']}")
+        print(f"Средняя квадратичная ошибка CV: {self.polynomial_result['cv_mse']}")
+        print(f"Число степеней свободы (приблизительно): {self.polynomial_result['degree'] + 1}")
 
         print("\n#########################\n")
-        print("Task 4. Point 2")
-        print("Fixed-knot cubic spline without smoothing")
-        print(f"Knots: {self.spline_result['knots']}")
-        print(f"Train MSE: {self.spline_result['train_mse']}")
-        print(f"Degrees of freedom (approx): {self.spline_result['degrees_of_freedom']}")
+        print("Задание 4. Пункт 2")
+        print("Кубический сплайн с фиксированными узлами без сглаживания")
+        print(f"Узлы: {self.spline_result['knots']}")
+        print(f"Средняя квадратичная ошибка на обучении: {self.spline_result['train_mse']}")
+        print(f"Число степеней свободы (приблизительно): {self.spline_result['degrees_of_freedom']}")
 
         print("\n#########################\n")
-        print("Task 4. Point 3")
-        print("Fixed-knot cubic spline with smoothing")
-        print(f"Knots: {self.smoothed_spline_result['knots']}")
-        print(f"Alpha: {self.smoothed_spline_result['alpha']}")
-        print(f"CV MSE: {self.smoothed_spline_result['cv_mse']}")
-        print(f"Train MSE: {self.smoothed_spline_result['train_mse']}")
+        print("Задание 4. Пункт 3")
+        print("Кубический сплайн с фиксированными узлами и сглаживанием")
+        print(f"Узлы: {self.smoothed_spline_result['knots']}")
+        print(f"Параметр alpha: {self.smoothed_spline_result['alpha']}")
+        print(f"Средняя квадратичная ошибка CV: {self.smoothed_spline_result['cv_mse']}")
+        print(f"Средняя квадратичная ошибка на обучении: {self.smoothed_spline_result['train_mse']}")
         print(
-            "Degrees of freedom (approx): "
+            "Число степеней свободы (приблизительно): "
             f"{self.smoothed_spline_result['degrees_of_freedom']}"
         )
+
+        print("\n#########################\n")
+        print("Задание 4. Пункт 4")
+        print("Построены базисные функции для кубического сплайна с фиксированными узлами")
+        print(f"Узлы: {self.fixed_knots.ravel().tolist()}")
+        print(f"График базисных функций сохранён в: {self.basis_plot_path}")
 
 
 if __name__ == "__main__":
