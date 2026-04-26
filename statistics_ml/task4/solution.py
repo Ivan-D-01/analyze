@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -41,8 +42,10 @@ class ExpantionsResolver:
         pipeline = Pipeline(
             [
                 ("poly", PolynomialFeatures(include_bias=False)),
-                ("scale", StandardScaler()), # Добавлено из-за LinAlgWarning: Ill-conditioned matrix (rcond=8.57037e-17): result may not be accurate.
-                                             # return linalg.solve(A, Xy, assume_a="pos", overwrite_a=True).T
+                (
+                    "scale",
+                    StandardScaler(),
+                ),  # Добавлено из-за LinAlgWarning: ill-conditioned matrix.
                 ("ridge", Ridge()),
             ]
         )
@@ -74,10 +77,10 @@ class ExpantionsResolver:
                     SplineTransformer(
                         degree=3,
                         knots=self.fixed_knots,
-                        include_bias=False
+                        include_bias=False,
                     ),
                 ),
-                ("ridge", Ridge(alpha=0.0))
+                ("ridge", Ridge(alpha=0.0)),
             ]
         )
         model.fit(x, y)
@@ -98,7 +101,6 @@ class ExpantionsResolver:
                         degree=3,
                         knots=self.fixed_knots,
                         include_bias=False,
-                        #extrapolation="continue",
                     ),
                 ),
                 ("ridge", Ridge()),
@@ -125,15 +127,13 @@ class ExpantionsResolver:
         }
         return best_model
 
-
-    def fit_smoothed_x_knot_cubic_spline(self, x : np.array, y: np.array):
-        
+    def fit_smoothed_x_knot_cubic_spline(self, x: np.ndarray, y: np.ndarray):
         x_knots = np.unique(
             np.sort(
-                np.random.choice(x,size = (int(len(x) * self.percent_of_x_knots))),
-                axis=0),
-            axis=0)
-        
+                np.random.choice(x[:, 0], size=int(len(x) * self.percent_of_x_knots), replace=False)
+            )
+        ).reshape(-1, 1)
+
         pipeline = Pipeline(
             [
                 (
@@ -168,7 +168,15 @@ class ExpantionsResolver:
         }
         return best_model
 
-    def make_plot(self, x, y, polynomial_model, spline_model, smoothed_spline_model):
+    def make_plot(
+        self,
+        x,
+        y,
+        polynomial_model,
+        spline_model,
+        smoothed_spline_model,
+        smoothed_x_knots_spline_model,
+    ):
         grid_x = np.linspace(self.domain[0], self.domain[1], 400).reshape(-1, 1)
         plt.figure(figsize=(10, 6))
         plt.scatter(x[:, 0], y, color="black", s=25, label="выборка")
@@ -203,6 +211,13 @@ class ExpantionsResolver:
             color="red",
             label="сглаживающий кубический сплайн с фиксированными узлами",
         )
+        plt.plot(
+            grid_x[:, 0],
+            smoothed_x_knots_spline_model.predict(grid_x),
+            linewidth=2,
+            color="purple",
+            label="сглаживающий кубический сплайн по наблюдаемым x",
+        )
         plt.title("Полиномиальный ридж и кубические сплайны")
         plt.xlabel("x")
         plt.ylabel("y")
@@ -214,7 +229,7 @@ class ExpantionsResolver:
     def make_basis_plot(self, spline_model):
         grid_x = np.linspace(self.domain[0], self.domain[1], 400).reshape(-1, 1)
         basis = spline_model.named_steps["spline"].transform(grid_x)
-        # Строятся B-сплайны, они обеспечивают локальность 
+
         plt.figure(figsize=(10, 6))
         for idx in range(basis.shape[1]):
             plt.plot(grid_x[:, 0], basis[:, idx], linewidth=2, label=f"базис {idx + 1}")
@@ -241,7 +256,14 @@ class ExpantionsResolver:
         spline_model = self.fit_fixed_knot_cubic_spline(x, y)
         smoothed_spline_model = self.fit_smoothed_fixed_knot_cubic_spline(x, y)
         smoothed_x_knots_spline_model = self.fit_smoothed_x_knot_cubic_spline(x, y)
-        self.make_plot(x, y, polynomial_model, spline_model, smoothed_spline_model)
+        self.make_plot(
+            x,
+            y,
+            polynomial_model,
+            spline_model,
+            smoothed_spline_model,
+            smoothed_x_knots_spline_model,
+        )
         self.make_basis_plot(spline_model)
 
         print("\n#########################\n")
@@ -255,14 +277,20 @@ class ExpantionsResolver:
         print(f"Степень: {self.polynomial_result['degree']}")
         print(f"Параметр alpha: {self.polynomial_result['alpha']}")
         print(f"Средняя квадратичная ошибка CV: {self.polynomial_result['cv_mse']}")
-        print(f"Число степеней свободы (приблизительно): {self.polynomial_result['degree'] + 1}")
+        print(
+            "Число степеней свободы (приблизительно): "
+            f"{self.polynomial_result['degree'] + 1}"
+        )
 
         print("\n#########################\n")
         print("Задание 4. Пункт 2")
         print("Кубический сплайн с фиксированными узлами без сглаживания")
         print(f"Узлы: {self.spline_result['knots']}")
         print(f"Средняя квадратичная ошибка на обучении: {self.spline_result['train_mse']}")
-        print(f"Число степеней свободы (приблизительно): {self.spline_result['degrees_of_freedom']}")
+        print(
+            "Число степеней свободы (приблизительно): "
+            f"{self.spline_result['degrees_of_freedom']}"
+        )
 
         print("\n#########################\n")
         print("Задание 4. Пункт 3")
@@ -270,7 +298,10 @@ class ExpantionsResolver:
         print(f"Узлы: {self.smoothed_spline_result['knots']}")
         print(f"Параметр alpha: {self.smoothed_spline_result['alpha']}")
         print(f"Средняя квадратичная ошибка CV: {self.smoothed_spline_result['cv_mse']}")
-        print(f"Средняя квадратичная ошибка на обучении: {self.smoothed_spline_result['train_mse']}")
+        print(
+            "Средняя квадратичная ошибка на обучении: "
+            f"{self.smoothed_spline_result['train_mse']}"
+        )
         print(
             "Число степеней свободы (приблизительно): "
             f"{self.smoothed_spline_result['degrees_of_freedom']}"
@@ -281,6 +312,21 @@ class ExpantionsResolver:
         print("Построены базисные функции для кубического сплайна с фиксированными узлами")
         print(f"Узлы: {self.fixed_knots.ravel().tolist()}")
         print(f"График базисных функций сохранён в: {self.basis_plot_path}")
+
+        print("\n#########################\n")
+        print("Задание 4. Пункт 5")
+        print("Сглаживающий кубический сплайн с узлами, равными наблюдаемым x")
+        print(f"Узлы: {self.smoothed_x_knot_spline_result['knots']}")
+        print(f"Параметр alpha: {self.smoothed_x_knot_spline_result['alpha']}")
+        print(f"Средняя квадратичная ошибка CV: {self.smoothed_x_knot_spline_result['cv_mse']}")
+        print(
+            "Средняя квадратичная ошибка на обучении: "
+            f"{self.smoothed_x_knot_spline_result['train_mse']}"
+        )
+        print(
+            "Число степеней свободы (приблизительно): "
+            f"{self.smoothed_x_knot_spline_result['degrees_of_freedom']}"
+        )
 
 
 if __name__ == "__main__":
