@@ -22,7 +22,9 @@ class ExpantionsResolver:
         self.polynomial_result = None
         self.spline_result = None
         self.smoothed_spline_result = None
+        self.smoothed_x_knot_spline_result = None
         self.fixed_knots = np.array([-2.0, -0.5, 1.0, 2.5, 4.0]).reshape(-1, 1)
+        self.percent_of_x_knots = 0.5
         np.random.seed(self.random_state)
 
     @staticmethod
@@ -123,6 +125,49 @@ class ExpantionsResolver:
         }
         return best_model
 
+
+    def fit_smoothed_x_knot_cubic_spline(self, x : np.array, y: np.array):
+        
+        x_knots = np.unique(
+            np.sort(
+                np.random.choice(x,size = (int(len(x) * self.percent_of_x_knots))),
+                axis=0),
+            axis=0)
+        
+        pipeline = Pipeline(
+            [
+                (
+                    "spline",
+                    SplineTransformer(
+                        degree=3,
+                        knots=x_knots,
+                        include_bias=False,
+                    ),
+                ),
+                ("ridge", Ridge()),
+            ]
+        )
+        param_grid = {"ridge__alpha": np.logspace(-6, 3, 25)}
+        search = GridSearchCV(
+            estimator=pipeline,
+            param_grid=param_grid,
+            scoring="neg_mean_squared_error",
+            cv=5,
+            n_jobs=1,
+        )
+        search.fit(x, y)
+
+        best_model = search.best_estimator_
+        pred = best_model.predict(x)
+        self.smoothed_x_knot_spline_result = {
+            "knots": x_knots.ravel().tolist(),
+            "alpha": search.best_params_["ridge__alpha"],
+            "cv_mse": -search.best_score_,
+            "train_mse": float(np.mean((y - pred) ** 2)),
+            "degrees_of_freedom": int(best_model.named_steps["spline"].n_features_out_ + 1),
+        }
+        return best_model
+
     def make_plot(self, x, y, polynomial_model, spline_model, smoothed_spline_model):
         grid_x = np.linspace(self.domain[0], self.domain[1], 400).reshape(-1, 1)
         plt.figure(figsize=(10, 6))
@@ -169,8 +214,7 @@ class ExpantionsResolver:
     def make_basis_plot(self, spline_model):
         grid_x = np.linspace(self.domain[0], self.domain[1], 400).reshape(-1, 1)
         basis = spline_model.named_steps["spline"].transform(grid_x)
-        # Стротся B-сплайны, они обеспечивают локальность 
-        # 
+        # Строятся B-сплайны, они обеспечивают локальность 
         plt.figure(figsize=(10, 6))
         for idx in range(basis.shape[1]):
             plt.plot(grid_x[:, 0], basis[:, idx], linewidth=2, label=f"базис {idx + 1}")
@@ -196,6 +240,7 @@ class ExpantionsResolver:
         polynomial_model = self.fit_polynomial_ridge(x, y)
         spline_model = self.fit_fixed_knot_cubic_spline(x, y)
         smoothed_spline_model = self.fit_smoothed_fixed_knot_cubic_spline(x, y)
+        smoothed_x_knots_spline_model = self.fit_smoothed_x_knot_cubic_spline(x, y)
         self.make_plot(x, y, polynomial_model, spline_model, smoothed_spline_model)
         self.make_basis_plot(spline_model)
 
