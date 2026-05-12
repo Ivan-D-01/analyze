@@ -1,35 +1,13 @@
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
+import numpy as np
+def objective_raw(x: np.ndarray) -> float:
+    x1, x2 = float(x[0]), float(x[1])
+    return (x1**2 + x2 - 5) ** 2 + (x1 + x2**2 - 5) ** 2
 
-def main():
-    spark = SparkSession.builder \
-        .appName("SparkMasterTestJob") \
-        .getOrCreate()
 
-    spark.sparkContext.setLogLevel("WARN")
-    try:
-        data = [
-            ("Alice", 34, "Engineering"),
-            ("Bob", 45, "Sales"),
-            ("Charlie", 28, "Marketing")
-        ]
-        columns = ["name", "age", "department"]
+#  - Adam: (1.791286863304, 1.791286863304)
+#  - PSO: (1.791292173972, 1.791285138457)
+#
+#-2.791280311193, -2.791283640997
 
-        df = spark.createDataFrame(data, columns)
-
-        print("=== Исходные данные ===")
-        df.show()
-
-        filtered_df = df.filter(col("age") > 30)
-        print("=== Люди старше 30 ===")
-        filtered_df.show()
-
-        dept_stats = df.groupBy("department").count()
-        print("=== Количество людей по отделам ===")
-        dept_stats.show()
-
-    finally:
-        spark.stop()
-
-if __name__ == "__main__":
-    main()
+print(objective_raw(x=np.array([1.791292173972, 1.791285138457])))
+print(objective_raw(x=np.array([-2.791280311193, -2.791283640997])))

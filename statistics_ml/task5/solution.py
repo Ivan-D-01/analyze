@@ -49,11 +49,28 @@ class Task5Resolver:
             exog=[x],
             var_type="c",
             reg_type=reg_type,
+            # bw="cv_ls" означает автоматический подбор ширины окна:
+            # statsmodels перебирает кандидаты и выбирает bandwidth,
+            # минимизирующий leave-one-out CV критерий наименьших квадратов.
             bw="cv_ls",
             ckertype=kernel_name,
         )
 
     def fit_kernel_smoother(self, x, y):
+        # gaussian использует веса, плавно убывающие с расстоянием от точки x:
+        # дальние наблюдения влияют мало, но не обнуляются полностью.
+        # tricube тоже сильнее взвешивает близкие точки, но делает это локальнее:
+        # вне окна вклад наблюдений становится нулевым.
+
+        # Для gaussian ядра:
+
+        # K(u) = (1 / sqrt(2*pi)) * exp(-u^2 / 2)
+
+        # Для tricube ядра:
+
+        # K(u) = (1 - |u|^3)^3,  при |u| <= 1
+        # K(u) = 0,               при |u| > 1
+
         kernels = ["gaussian", "tricube"]
         reg_types = ["lc", "ll"]
 
@@ -118,12 +135,17 @@ class Task5Resolver:
         plt.close()
 
     def fit_gaussian_process(self, x, y):
+        # GaussianProcessRegressor ожидает матрицу признаков формы (n_samples, n_features),
+        # поэтому одномерный вектор x разворачиваем в столбец.
         x_2d = x.reshape(-1, 1)
         cv = KFold(n_splits=5, shuffle=True, random_state=self.random_state)
         kernel_candidates = [
             (
                 "linear",
                 [
+                    # DotProduct задаёт линейные функции вида a + b * x.
+                    # WhiteKernel добавляет независимый шум наблюдений.
+                    # kDotProduct(x, x') = sigma_0 + x·x'
                     DotProduct(sigma_0=sigma_0) + WhiteKernel(noise_level=noise_level)
                     for sigma_0 in [1e-6, 0.5, 1.0]
                     for noise_level in [0.01, 0.04, 0.09]
@@ -132,6 +154,11 @@ class Task5Resolver:
             (
                 "gaussian",
                 [
+                    # RBF задаёт очень гладкие функции:
+                    # близкие x и x' дают близкие значения f(x) и f(x').
+                    # Чем больше length_scale, тем плавнее итоговая кривая.
+                    
+                    # kRBF(x, x') = exp(-(x - x')**2 / (2 * length_scale**2))
                     RBF(length_scale=length_scale) + WhiteKernel(noise_level=noise_level)
                     for length_scale in [0.2, 0.4, 0.8, 1.2]
                     for noise_level in [0.01, 0.04, 0.09]
@@ -140,6 +167,9 @@ class Task5Resolver:
             (
                 "exponential",
                 [
+                    # Matern с nu=0.5 соответствует экспоненциальному ядру
+                    # k(x, x') = exp(-|x - x'| / length_scale): функции менее гладкие,
+                    # допускают более резкие локальные изменения, чем RBF.
                     Matern(length_scale=length_scale, nu=0.5)
                     + WhiteKernel(noise_level=noise_level)
                     for length_scale in [0.2, 0.4, 0.8, 1.2]
@@ -154,7 +184,7 @@ class Task5Resolver:
             for kernel in kernels:
                 model = GaussianProcessRegressor(
                     kernel=kernel,
-                    alpha=0.0,
+                    alpha=0.0, # шум к диагонали ковариацонной матрицы
                     normalize_y=True,
                     optimizer=None,
                     random_state=self.random_state,

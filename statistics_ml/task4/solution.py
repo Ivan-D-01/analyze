@@ -99,23 +99,24 @@ class ExpantionsResolver:
             [
                 (
                     "spline",
-                    SplineTransformer(
+                    SplineTransformer( # превращает исходный x в набор сплайновых базисных функций
                         degree=3,
                         knots=self.fixed_knots,
                         include_bias=False,
                     ),
                 ),
-                ("ridge", Ridge(alpha=0.0)),
-            ]
+                ("ridge", Ridge(alpha=0.0)), #  подбирает коэффициенты при этих базисных функциях
+            ] 
         )
         model.fit(x, y)
         pred = model.predict(x)
         self.spline_result = {
             "knots": self.fixed_knots.ravel().tolist(),
-            "cv_mse": self.compute_cv_mse(model, x, y),
+            "cv_mse": self.compute_cv_mse(model, x, y), # просто для сравнения добавлена для 6 пункта
             "train_mse": self.mse(y, pred),
             "degrees_of_freedom": int(model.named_steps["spline"].n_features_out_ + 1),
-        }
+            # + 1 так как в Ridge(alpha=0.0) fit_intercept: bool = True,
+        } 
         return model
 
     def fit_smoothed_fixed_knot_cubic_spline(self, x, y):
@@ -354,7 +355,7 @@ class ExpantionsResolver:
             f"{self.format_number(self.polynomial_result['train_mse'])}"
         )
         print(
-            "Число степеней свободы (приблизительно): "
+            "Число степеней свободы: "
             f"{self.polynomial_result['degrees_of_freedom']}"
         )
 
@@ -371,7 +372,7 @@ class ExpantionsResolver:
             f"{self.format_number(self.spline_result['train_mse'])}"
         )
         print(
-            "Число степеней свободы (приблизительно): "
+            "Число степеней свободы: "
             f"{self.spline_result['degrees_of_freedom']}"
         )
 
@@ -389,7 +390,7 @@ class ExpantionsResolver:
             f"{self.format_number(self.smoothed_spline_result['train_mse'])}"
         )
         print(
-            "Число степеней свободы (приблизительно): "
+            "Число степеней свободы: "
             f"{self.smoothed_spline_result['degrees_of_freedom']}"
         )
 
@@ -416,7 +417,7 @@ class ExpantionsResolver:
             f"{self.format_number(self.smoothed_x_knot_spline_result['train_mse'])}"
         )
         print(
-            "Число степеней свободы (приблизительно): "
+            "Число степеней свободы: "
             f"{self.smoothed_x_knot_spline_result['degrees_of_freedom']}"
         )
 
