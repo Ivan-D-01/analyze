@@ -367,6 +367,9 @@ def pso_optimize(
 
 
 def run_experiments() -> list[RunResult]:
+    #x1_values = np.linspace(-10.0, 10.0, 10)
+    #x2_values = np.linspace(-10.0, 15.0, 10)
+    #starts = [np.array([x1, x2]) for x1 in x1_values for x2 in x2_values]
     starts = [
         np.array([10.0, 15.0]),
         np.array([3.0, 3.0]),
@@ -441,69 +444,6 @@ def format_point(point: np.ndarray) -> str:
 
 def format_point_pdf(point: np.ndarray) -> str:
     return f"({point[0]:.2f}, {point[1]:.2f})"
-
-
-def build_conclusion(results: list[RunResult]) -> list[str]:
-    summary = summarize_by_method(results)
-    minima = detect_distinct_minima(results)
-    best_by_method = best_result_per_method(results)
-
-    fastest = min(summary, key=lambda item: item["avg_time"])
-    cheapest = min(summary, key=lambda item: item["avg_func_calls"])
-    most_reliable = max(summary, key=lambda item: item["successes"] / item["runs"])
-
-    lines = [
-        "Краткий вывод:",
-        f"1. Найдено различных минимумов с f(x) ~= 0: {len(minima)}.",
-        f"2. Наиболее быстрый по среднему времени: {fastest['method']}.",
-        f"3. Наиболее экономный по вызовам функции: {cheapest['method']}.",
-        f"4. Наиболее стабильный по числу успешных запусков: {most_reliable['method']}.",
-    ]
-
-    for method, result in best_by_method.items():
-        lines.append(
-            f"{method}: лучшая точка {format_point(result.x_best)}, "
-            f"f = {result.f_best:.3e}, итерации = {result.iterations}."
-        )
-
-    lines.append(
-        "Практически для этой задачи Adam обычно выигрывает по скорости при хорошем старте, "
-        "Nelder-Mead удобен без производных, а PSO полезен как более глобальный метод, "
-        "но платит за это большим числом вычислений."
-    )
-    return lines
-
-
-def build_conclusion_pdf(results: list[RunResult]) -> list[str]:
-    summary = summarize_by_method(results)
-    minima = detect_distinct_minima(results)
-    best_by_method = best_result_per_method(results)
-
-    fastest = min(summary, key=lambda item: item["avg_time"])
-    cheapest = min(summary, key=lambda item: item["avg_func_calls"])
-    most_reliable = max(summary, key=lambda item: item["successes"] / item["runs"])
-
-    lines = [
-        "Краткий вывод:",
-        f"1. Найдено различных минимумов с f(x) ~= 0: {len(minima)}.",
-        f"2. Наиболее быстрый по среднему времени: {fastest['method']}.",
-        f"3. Наиболее экономный по вызовам функции: {cheapest['method']}.",
-        f"4. Наиболее стабильный по числу успешных запусков: {most_reliable['method']}.",
-    ]
-
-    for method, result in best_by_method.items():
-        lines.append(
-            f"{method}: лучшая точка {format_point_pdf(result.x_best)}, "
-            f"f = {result.f_best:.2e}, iterations = {result.iterations}."
-        )
-
-    lines.append(
-        "Практически для этой задачи Adam обычно выигрывает по скорости при хорошем старте, "
-        "Nelder-Mead удобен без производных, а PSO полезен как более глобальный метод, "
-        "но платит за это большим числом вычислений."
-    )
-    return lines
-
 
 def add_table_page(
     pdf: PdfPages,
@@ -637,20 +577,6 @@ def add_plot_page(
     plt.close(fig)
 
 
-def add_conclusion_page(pdf: PdfPages, results: list[RunResult]) -> None:
-    fig, ax = plt.subplots(figsize=(11.69, 8.27))
-    ax.axis("off")
-    ax.set_title("Краткий отчет", fontsize=16, pad=18)
-
-    conclusion_lines = build_conclusion_pdf(results)
-    text = "\n".join(conclusion_lines)
-    ax.text(0.03, 0.95, text, va="top", ha="left", fontsize=12, wrap=True)
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-
 def create_pdf_report(results: list[RunResult], output_path: Path) -> None:
     detailed_columns = [
         "Метод",
@@ -698,7 +624,7 @@ def create_pdf_report(results: list[RunResult], output_path: Path) -> None:
     ]
 
     with PdfPages(output_path) as pdf:
-        add_conclusion_page(pdf, results)
+        #add_conclusion_page(pdf, results)
         add_table_page(pdf, "Сводная таблица по методам", summary_columns, summary_rows, font_size=10)
         add_table_page(pdf, "Подробные результаты запусков (сортировка по f_best по убыванию)", detailed_columns, detailed_rows, font_size=7)
         add_plot_page(
