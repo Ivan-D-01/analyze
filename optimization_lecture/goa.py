@@ -17,11 +17,13 @@ def grasshopper_optimization(obj_func, dim, n_grasshoppers, max_iter, lb, ub):
         
         for i in range(n_grasshoppers):
             social_effect = np.zeros(dim)
-            for j in range(n_grasshoppers):
+            neighbors = grasshoppers[np.random.choice(n_grasshoppers, size=5, replace=False)]
+            
+            for j in range(len(neighbors)):
                 if i != j:
-                    r = np.linalg.norm(grasshoppers[j] - grasshoppers[i])
+                    r = np.linalg.norm(neighbors[j] - grasshoppers[i])
                     s = 0.5 * np.exp(-r / 1.5) - np.exp(-r)  # Функция s(r)
-                    social_effect += s * (grasshoppers[j] - grasshoppers[i]) / (r + 1e-10)
+                    social_effect += s * (neighbors[j] - grasshoppers[i]) / (r + 1e-10)
             
             grasshoppers[i] = c * social_effect + target
             grasshoppers[i] = np.clip(grasshoppers[i], lb, ub)
@@ -47,7 +49,7 @@ if __name__ == "__main__":
     lb = -10      
     ub = 10       
 
-    best_solution, best_fitness = grasshopper_optimization(
+    best_solution, best_fitness, _ = grasshopper_optimization(
         sphere, dim, n_grasshoppers, max_iter, lb, ub
     )
 

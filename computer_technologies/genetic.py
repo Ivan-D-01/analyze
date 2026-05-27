@@ -2,11 +2,11 @@ import random
 import math
 import matplotlib.pyplot as plt
 
-POPULATION_SIZE = 100
-GENERATIONS = 500
+POPULATION_SIZE = 4
+GENERATIONS = 50
 MUTATION_RATE = 0.1
-NUM_CITIES = 20
-SECTION_POINT = 10
+NUM_CITIES = 5
+SECTION_POINT = 2
 
 def generate_cities(n):
     return [(random.uniform(0, 100), random.uniform(0, 100)) for _ in range(n)]
@@ -64,7 +64,7 @@ def next_generation(current_gen, cities):
 def genetic_algorithm(cities):
     population = create_population(POPULATION_SIZE, NUM_CITIES)
     best_route = None
-    best_grade = float('inf')
+    best_grade = 999999
     history = []
 
     for generation in range(GENERATIONS):
@@ -79,7 +79,7 @@ def genetic_algorithm(cities):
         history.append(best_grade)
         print(f"Поколение {generation+1}: Лучшая длина = {best_grade:.2f}")
 
-        if len(history) > 20 and abs(history[-1] - history[-10]) < 0.1:
+        if len(history) > int(GENERATIONS * 0.5) and abs(history[-1] - history[int(GENERATIONS * 0.5)]) < 0.1:
             print("Алгоритм сошёлся.")
             break
 
@@ -100,8 +100,12 @@ def plot_route(cities, route, title=""):
     plt.grid(True)
     plt.show()
 
+def generate_specific_cities():
+    return [(0,0),(2,3),(5,2),(6,6),(8,3)]
+
 if __name__ == "__main__":
-    cities = generate_cities(NUM_CITIES)
+    #cities = generate_cities(NUM_CITIES)
+    cities = generate_specific_cities()
     best_route, best_length, history = genetic_algorithm(cities)
 
     print(f"\nЛучший маршрут найден с длиной: {best_length:.2f}")

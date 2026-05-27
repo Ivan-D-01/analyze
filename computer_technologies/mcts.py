@@ -5,6 +5,7 @@ import numpy as np
 DEBUG = False
 DEBUG_1 = True
 ITERATIONS = 0
+
 class KrestiksAndNoliks:
     def __init__(self, board=None, current_player='X'):
         if board is None:
