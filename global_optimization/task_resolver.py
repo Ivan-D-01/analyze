@@ -93,11 +93,11 @@ def adam_optimize(
 
         if f_value <= eps_f:
             converged = True
-            stop_reason = "f_tolerance"
+            stop_reason = "Значение функции <= eps_f"
             break
         if step_norm <= eps_x:
             converged = True
-            stop_reason = "x_tolerance"
+            stop_reason = "Значение не меняется step_norm <= eps_x"
             break
     else:
         iteration = max_iter
@@ -153,7 +153,7 @@ def nelder_mead_optimize(
 
     start_time = time.perf_counter()
     converged = False
-    stop_reason = "max_iter"
+    stop_reason = "Достигнуто максимальное число итераций"
 
     for iteration in range(1, max_iter + 1):
         # Упорядочиваем вершины симплекса:
@@ -171,7 +171,7 @@ def nelder_mead_optimize(
         # Останавливаемся, если лучшее значение функции уже достаточно мало.
         if values[0] <= eps_f:
             converged = True
-            stop_reason = "f_tolerance"
+            stop_reason = "Значение функции <= eps_f"
             break
 
         # Останавливаемся, если симплекс стал очень маленьким,
@@ -266,65 +266,85 @@ def pso_optimize(
     rng = np.random.default_rng(seed)
     low, high = bounds
 
+    # Начальные позиции частиц генерируем около стартовой точки.
     positions = start + rng.normal(loc=0.0, scale=2.0, size=(swarm_size, 2))
     positions = np.clip(positions, low, high)
+    # Первую частицу оставляем ровно в стартовой точке.
     positions[0] = np.array(start, dtype=float)
+    # Начальные скорости задаём случайно, но не слишком большими.
     velocities = rng.uniform(-(high - low) * 0.1, (high - low) * 0.1, size=(swarm_size, 2))
 
+    # В начале текущая позиция каждой частицы считается её личным лучшим положением.
     personal_best_positions = positions.copy()
     personal_best_values = np.array([counter.f(position) for position in positions], dtype=float)
+    # Глобально лучшую точку выбираем как лучшую среди всех частиц.
     best_index = int(np.argmin(personal_best_values))
     global_best_position = personal_best_positions[best_index].copy()
     global_best_value = float(personal_best_values[best_index])
+    # История нужна для графиков: лучшее значение функции и лучшая точка на каждой итерации.
     history: list[float] = [global_best_value]
     point_history: list[np.ndarray] = [global_best_position.copy()]
 
     start_time = time.perf_counter()
     converged = False
     stop_reason = "max_iter"
+    # Эти переменные нужны, чтобы отслеживать застой алгоритма.
     previous_global_best = global_best_position.copy()
     stall_iterations = 0
 
     for iteration in range(1, max_iter + 1):
+        # Случайные коэффициенты делают движение роя стохастическим.
         r1 = rng.random((swarm_size, 2))
         r2 = rng.random((swarm_size, 2))
+        # Скорость частицы складывается из инерции,
+        # притяжения к своему лучшему положению и к лучшему положению всего роя.
         velocities = (
             inertia * velocities
             + c1 * r1 * (personal_best_positions - positions)
             + c2 * r2 * (global_best_position - positions)
         )
+        # Обновляем позиции и не даём частицам выйти за область поиска.
         positions = np.clip(positions + velocities, low, high)
 
+        # Обновляем личный лучший результат каждой частицы.
         for i in range(swarm_size):
             value = counter.f(positions[i])
             if value < personal_best_values[i]:
                 personal_best_values[i] = value
                 personal_best_positions[i] = positions[i].copy()
 
+        # После обновления личных рекордов проверяем глобальный лучший результат роя.
         best_index = int(np.argmin(personal_best_values))
         if personal_best_values[best_index] < global_best_value:
             global_best_value = float(personal_best_values[best_index])
             global_best_position = personal_best_positions[best_index].copy()
 
+        # Сохраняем историю лучшего найденного значения и траекторию лучшей точки.
         history.append(global_best_value)
         point_history.append(global_best_position.copy())
+        # best_step показывает, насколько сдвинулась лучшая точка,
+        # best_value_change — насколько изменилось лучшее значение функции.
         best_step = float(np.linalg.norm(global_best_position - previous_global_best))
         best_value_change = abs(history[-1] - history[-2])
         previous_global_best = global_best_position.copy()
 
+        # Останавливаемся, если значение функции уже достаточно мало.
         if global_best_value <= eps_f:
             converged = True
-            stop_reason = "f_tolerance"
+            stop_reason = "Значение функции <= eps_f"
             break
 
+        # Если и точка, и значение функции почти не меняются,
+        # считаем это одной итерацией застоя.
         if best_step <= eps_x and best_value_change <= eps_f:
             stall_iterations += 1
         else:
             stall_iterations = 0
 
+        # Если застой длится долго, считаем, что алгоритм фактически сошёлся.
         if stall_iterations >= 40:
             converged = True
-            stop_reason = "stall_tolerance"
+            stop_reason = "Значение не меняется уже 40 итераций"
             break
     else:
         iteration = max_iter
@@ -348,7 +368,7 @@ def pso_optimize(
 
 def run_experiments() -> list[RunResult]:
     starts = [
-        np.array([0.0, 0.0]),
+        np.array([10.0, 15.0]),
         np.array([3.0, 3.0]),
         np.array([-3.0, -3.0]),
         np.array([2.0, -2.0]),
@@ -407,6 +427,14 @@ def best_result_per_method(results: list[RunResult]) -> dict[str, RunResult]:
     return best
 
 
+def longest_result_per_method(results: list[RunResult]) -> dict[str, RunResult]:
+    longest: dict[str, RunResult] = {}
+    for result in results:
+        if result.method not in longest or result.iterations > longest[result.method].iterations:
+            longest[result.method] = result
+    return longest
+
+
 def format_point(point: np.ndarray) -> str:
     return f"({point[0]:.12f}, {point[1]:.12f})"
 
@@ -435,7 +463,7 @@ def build_conclusion(results: list[RunResult]) -> list[str]:
     for method, result in best_by_method.items():
         lines.append(
             f"{method}: лучшая точка {format_point(result.x_best)}, "
-            f"f = {result.f_best:.3e}, iterations = {result.iterations}."
+            f"f = {result.f_best:.3e}, итерации = {result.iterations}."
         )
 
     lines.append(
@@ -510,18 +538,25 @@ def add_table_page(
     plt.close(fig)
 
 
-def add_plot_page(pdf: PdfPages, results: list[RunResult]) -> None:
+def add_plot_page(
+    pdf: PdfPages,
+    results: list[RunResult],
+    selected_runs: dict[str, RunResult],
+    title_suffix: str,
+    convergence_title: str,
+    run_label: str,
+    show_iterations: bool = False,
+) -> None:
     fig, axes = plt.subplots(2, 2, figsize=(11.69, 8.27), constrained_layout=True)
     contour_axes = [axes[0, 0], axes[0, 1], axes[1, 0]]
     convergence_ax = axes[1, 1]
-    x = np.linspace(-5.5, 5.5, 250)
-    y = np.linspace(-5.5, 5.5, 250)
+    x = np.linspace(-20.5, 20.5, 250)
+    y = np.linspace(-20.5, 20.5, 250)
     xx, yy = np.meshgrid(x, y)
     zz = (xx**2 + yy - 5) ** 2 + (xx + yy**2 - 5) ** 2
 
     colors = {"Adam": "#d1495b", "Nelder-Mead": "#00798c", "PSO": "#edae49"}
     methods = ["Adam", "Nelder-Mead", "PSO"]
-    best_runs = best_result_per_method(results)
     for ax, method in zip(contour_axes, methods):
         method_results = [result for result in results if result.method == method]
         #contour = ax.contourf(xx, yy, np.log10(zz + 1e-6), levels=30, cmap="viridis")
@@ -536,13 +571,19 @@ def add_plot_page(pdf: PdfPages, results: list[RunResult]) -> None:
             alpha=0.85,
         )
         ax.set_title(f"{method}: найденные точки")
-        trajectory = np.array(best_runs[method].point_history, dtype=float)
+        trajectory = np.array(selected_runs[method].point_history, dtype=float)
         ax.plot(
             trajectory[:, 0],
             trajectory[:, 1],
             color="white",
             linewidth=1.8,
             alpha=0.95,
+            marker="o",
+            markersize=3.5,
+            markerfacecolor="white",
+            markeredgecolor="black",
+            markeredgewidth=0.35,
+            label=run_label,
         )
         ax.scatter(
             trajectory[0, 0],
@@ -552,7 +593,7 @@ def add_plot_page(pdf: PdfPages, results: list[RunResult]) -> None:
             color="white",
             edgecolors="black",
             linewidths=0.5,
-            label="start",
+            label="старт",
         )
         ax.scatter(
             trajectory[-1, 0],
@@ -562,15 +603,27 @@ def add_plot_page(pdf: PdfPages, results: list[RunResult]) -> None:
             color="white",
             edgecolors="black",
             linewidths=0.5,
-            label="finish",
+            label="финиш",
         )
         ax.set_xlabel("x1")
         ax.set_ylabel("x2")
+        if show_iterations:
+            ax.text(
+                0.03,
+                0.03,
+                f"iterations = {selected_runs[method].iterations}",
+                transform=ax.transAxes,
+                ha="left",
+                va="bottom",
+                fontsize=9,
+                color="white",
+                bbox={"facecolor": "black", "alpha": 0.45, "pad": 4},
+            )
         ax.legend(loc="upper right")
     #fig.colorbar(contour, ax=contour_axes, shrink=0.82, pad=0.04, label="log10(f(x) + 1e-6)")
     fig.colorbar(contour, ax=contour_axes, shrink=0.82, pad=0.04, label="f(x)")
 
-    for method, result in best_runs.items():
+    for method, result in selected_runs.items():
         values = np.maximum(np.array(result.history, dtype=float), 1e-16)
         convergence_ax.semilogy(values, label=method, color=colors[method], linewidth=2)
 
@@ -607,9 +660,9 @@ def create_pdf_report(results: list[RunResult], output_path: Path) -> None:
         "f_best",
         "Итерации",
         "f calls",
-        "Время, c",
-        "Стоп",
+        "Время, миллисекунды"
     ]
+    detailed_results = sorted(results, key=lambda result: result.f_best, reverse=True)
     detailed_rows = [
         [
             result.method,
@@ -619,10 +672,9 @@ def create_pdf_report(results: list[RunResult], output_path: Path) -> None:
             f"{result.f_best:.2e}",
             str(result.iterations),
             str(result.func_calls),
-            f"{result.elapsed_time:.2f}",
-            result.stop_reason,
+            f"{result.elapsed_time * 1000:.2f}"
         ]
-        for result in results
+        for result in detailed_results
     ]
 
     summary_columns = [
@@ -639,7 +691,7 @@ def create_pdf_report(results: list[RunResult], output_path: Path) -> None:
             str(item["runs"]),
             str(item["successes"]),
             f"{float(item['best_f']):.2e}",
-            f"{float(item['avg_time']):.2f}",
+            f"{float(item['avg_time']) * 1000:.2f}",
             f"{float(item['avg_func_calls']):.2f}",
         ]
         for item in summarize_by_method(results)
@@ -648,8 +700,24 @@ def create_pdf_report(results: list[RunResult], output_path: Path) -> None:
     with PdfPages(output_path) as pdf:
         add_conclusion_page(pdf, results)
         add_table_page(pdf, "Сводная таблица по методам", summary_columns, summary_rows, font_size=10)
-        add_table_page(pdf, "Подробные результаты запусков", detailed_columns, detailed_rows, font_size=7)
-        add_plot_page(pdf, results)
+        add_table_page(pdf, "Подробные результаты запусков (сортировка по f_best по убыванию)", detailed_columns, detailed_rows, font_size=7)
+        add_plot_page(
+            pdf,
+            results,
+            best_result_per_method(results),
+            "best convergence trajectory",
+            "Best-run convergence",
+            "траектория лучшего запуска",
+        )
+        add_plot_page(
+            pdf,
+            results,
+            longest_result_per_method(results),
+            "longest trajectory",
+            "Longest-run convergence",
+            "Самый длинный запуск по кол-ву итераций",
+            show_iterations=True,
+        )
 
 
 def print_console_summary(results: list[RunResult]) -> None:
