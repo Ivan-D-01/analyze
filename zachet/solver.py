@@ -39,27 +39,5 @@ def main() -> None:
     two_way_anova = sm.stats.anova_lm(two_way_model, typ=2)
     print(two_way_anova)
 
-    print_header("3. Wilks' lambda MANOVA: [F_1, C] ~ F_2")
-    categories = sorted(work_df["F_1"].dropna().unique())
-    mapping = {category: code for code, category in enumerate(categories)}
-    work_df["F_1_code"] = work_df["F_1"].map(mapping)
-
-    print("F_1 encoding:", mapping)
-
-    manova = MANOVA.from_formula("F_1_code + response_C ~ F_2", data=work_df)
-    manova_result = manova.mv_test()
-    print(manova_result)
-
-    print_header("Note")
-    print(
-        "In the MANOVA block, categorical F_1 is converted to numeric codes, "
-        "because Wilks' lambda requires numeric dependent variables."
-    )
-    print(
-        "This third analysis is therefore a technical approximation of the "
-        "requested model."
-    )
-
-
 if __name__ == "__main__":
     main()
