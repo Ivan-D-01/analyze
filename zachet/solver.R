@@ -62,10 +62,12 @@ print_header("3. Three-way ANOVA: C ~ F_1 * F_2 * F_3")
 three_way_model <- lm(C ~ F_1 * F_2 * F_3, data = df)
 print(anova(three_way_model))
 
-print_header("4. MANOVA: [F_1_code, C] ~ F_2")
-df$F_1_code <- unname(c(R = 0, S = 1, T = 2)[as.character(df$F_1)])
-manova_model <- manova(cbind(F_1_code, C) ~ F_2, data = df)
+print_header("MANOVA: [C, G] ~ F_1")
+manova_model <- manova(cbind(C, G) ~ F_1, data = df)
 print(summary(manova_model, test = "Wilks"))
+
+cat("\n")
+print(summary.aov(manova_model))
 
 pdf("boxplots_R.pdf", width = 14, height = 4)
 par(mfrow = c(1, 3), mar = c(5, 4, 3, 1))
@@ -84,16 +86,3 @@ dev.off()
 
 cat("\nSaved boxplots to boxplots_R.pdf\n")
 
-additive_model <- aov(C ~ F_1 + F_2, data = df)
-
-pdf("zachet_anova_plots.pdf", width = 9, height = 7)
-par(mfrow = c(2, 2))
-boxplot(C ~ F_1, data = df, main = "C by F_1", xlab = "F_1", ylab = "C", col = "#cfe8ff", border = "#222222")
-boxplot(C ~ F_2, data = df, main = "C by F_2", xlab = "F_2", ylab = "C", col = "#cfe8ff", border = "#222222")
-interaction.plot(df$F_2, df$F_1, df$C, xlab = "F_2", ylab = "mean(C)", trace.label = "F_1")
-plot.new()
-par(mfrow = c(2, 2))
-plot(additive_model)
-dev.off()
-
-cat("Saved diagnostic plots to zachet_anova_plots.pdf\n")
